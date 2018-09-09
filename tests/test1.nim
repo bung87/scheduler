@@ -7,3 +7,6 @@ proc testInterval(a:TimeInterval) =
     assert filled.len == 1
 
 testInterval(3.hours)
+
+var a =new(TimeInterval)
+echo a.seconds
