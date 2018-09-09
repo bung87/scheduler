@@ -9,7 +9,8 @@ import strscans
 import algorithm
 import strutils
 import random
-
+import macros
+{.experimental: "dotOperators".}
 type
     TimeObj = object
         second: SecondRange  
@@ -270,7 +271,7 @@ proc testInterval(a:TimeInterval) =
     let filled = filterIt(fields,it > 0)
     assert filled.len == 1
     
-proc every*(self:var Scheduler , interval:TimeInterval):ref Job=
+proc every*(self:var Scheduler , interval:TimeInterval):ref Job {.discardable.}=
     ##[
     Schedule a new periodic job.
     :param interval: A quantity of a certain time unit
@@ -281,7 +282,6 @@ proc every*(self:var Scheduler , interval:TimeInterval):ref Job=
     result.interval = interval
     result.scheduler = addr(self)
 
-
 proc get_next_run*(self: Scheduler):Option[DateTime] = 
     ##[
     Datetime when the next job should run.
@@ -290,7 +290,20 @@ proc get_next_run*(self: Scheduler):Option[DateTime] =
     if self.jobs.len != 0:
         result = some(min(self.jobs).next_run)
 
-
+proc every*(self:var Scheduler , interval:TimeInterval,body:proc())=
+    ##[
+    Schedule a new periodic job.
+    :param interval: A quantity of a certain time unit
+    :return: An unconfigured :class:`Job <Job>`
+    ]##
+    testInterval(interval)
+    var result = new(Job)
+    result.interval = interval
+    result.scheduler = addr(self)
+    result.job_func = body
+    result.schedule_next_run()
+    result.scheduler.jobs.add(result)
+        
 proc idle_seconds*(self:Scheduler):Natural =
     ##[
     :return: Number of seconds until
@@ -303,6 +316,8 @@ when isMainModule:
         echo "I'm working..."
     var schedule = Scheduler()
     discard schedule.every(3.seconds).todo(job)
+    schedule.every(3.seconds) do:
+        echo "I'm working too..."
     while true:
         schedule.run_pending()
         sleep(300)
