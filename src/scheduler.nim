@@ -1,4 +1,4 @@
-# schedule
+# scheduler
 # Copyright zhoupeng
 # job scheduling for humans
 import times
@@ -9,9 +9,7 @@ import strscans
 import algorithm
 import strutils
 import random
-import macros
-
-{.experimental.}
+import sets
 
 type
     TimeObj = object
@@ -23,23 +21,23 @@ type
     unit = enum
         umilliseconds,useconds,uminutes,uhours,udays,uweeks,umonths,uyears
     Job* = object 
-        tags: seq[string]
-        next_run:DateTime
-        last_run:DateTime
-        start_day:WeekDay
-        at_time:TimeObj
+        tags: HashSet[string]
+        nextRun:DateTime
+        lastRun:DateTime
+        startDay:WeekDay
+        atTime:TimeObj
         interval:TimeInterval
         latest:TimeInterval
         scheduler:ptr Scheduler
         unit:unit
         # when T is void:
-        job_func:proc()
+        jobFunc:proc()
         # else:
-        #     job_func:proc(a:T)
+        #     jobFunc:proc(a:T)
         #     arg:T
-    Scheduler* = object 
+    Scheduler* =ref object 
         jobs: seq[ref Job]
-        # next_run,last_run:float
+        # nextRun,lastRun:float
         
 proc `<`(x:DateTime, y: TimeObj): bool =
     result = (x.hour,x.minute,x.second) < (y.hour,y.minute,y.second)
@@ -49,7 +47,7 @@ proc `<`*(self, other:Job):bool =
     PeriodicJobs are sortable based on the scheduled time they
     run next.
     ]##
-    return self.next_run < other.next_run
+    return self.nextRun < other.nextRun
 
 proc `$`*(self:TimeObj):string =
     result = [self.hour,self.minute,self.second].join(":")
@@ -58,20 +56,20 @@ proc hasValue(self:TimeObj):bool =
     result = (self.hour or self.minute or self.second) > 0
 
 proc `$`*(self:Job):string = 
-    let timestats = "(last run: $#, next run: $#)" % [$self.last_run, $self.next_run]
+    let timestats = "(last run: $#, next run: $#)" % [$self.lastRun, $self.nextRun]
 
-    # if hasattr(self.job_func, "__name__"):
-    #     job_func_name = self.job_func.__name__
+    # if hasattr(self.jobFunc, "__name__"):
+    #     jobFunc_name = self.jobFunc.__name__
     # else:
-    #     job_func_name = repr(self.job_func)
-    # args = [repr(x) for x in self.job_func.args]
+    #     jobFunc_name = repr(self.jobFunc)
+    # args = [repr(x) for x in self.jobFunc.args]
     # kwargs = ["%s=%s" % (k, repr(v))
-    #             for k, v in self.job_func.keywords.items()]
-    # call_repr = job_func_name + "(" + ", ".join(args + kwargs) + ")"
-    let call_repr = repr(self.job_func)
+    #             for k, v in self.jobFunc.keywords.items()]
+    # call_repr = jobFunc_name + "(" + ", ".join(args + kwargs) + ")"
+    let call_repr = repr(self.jobFunc)
 
-    if (self.at_time.second or self.at_time.hour or self.at_time.minute) > 0:
-        result = "Every $# at $# do $# $#" % [$self.interval, $self.at_time, call_repr, timestats]   
+    if (self.atTime.second or self.atTime.hour or self.atTime.minute) > 0:
+        result = "Every $# at $# do $# $#" % [$self.interval, $self.atTime, call_repr, timestats]   
     else:
         result = "Every $# to $# do $# $#" % [$self.interval,$self.latest,call_repr,timestats]
 
@@ -83,8 +81,8 @@ proc tag*(self:var Job, tags:varargs[string]):Job =
     :param tags: A unique list of ``Hashable`` tags.
     :return: The invoked job instance
     ]##
-    self.tags.setLen 0
-    for x in tags: self.tags.add(x)
+    self.tags.clear()
+    for x in tags: self.tags.incl(x)
     return self
 
 proc at*(self:var Job, time_str:string):Job =
@@ -103,13 +101,12 @@ proc at*(self:var Job, time_str:string):Job =
         discard
     elif scanf(time_str, "$i", minute):
         discard
-    assert self.unit in [udays,uhours] or self.start_day != invalid
-    if self.unit == udays or self.start_day != invalid:
+    assert self.unit in [udays,uhours] or self.startDay != invalid
+    if self.unit == udays or self.startDay != invalid:
         hour = hour
     elif self.unit == uhours:
         hour = 0
-    self.at_time = TimeObj(hour:hour, minute:minute)
-    # assert 0 <= minute <= 59
+    self.atTime = TimeObj(hour:hour, minute:minute)
     return self
 
 proc to*(self:var Job, latest:TimeInterval):Job =
@@ -135,81 +132,81 @@ proc ranInitInterval(a:TimeInterval):TimeInterval =
     let years = rand(a.years)
     result = initTimeInterval(ms,sec,m,hours,days,months,years)
 
-proc empty(a:TimeInterval):bool =
+converter toBool(a:TimeInterval):bool =
     let fields = [a.nanoseconds,a.microseconds,a.milliseconds,a.seconds,a.minutes,a.hours,a.days,a.months,a.years]
     let filled = filterIt(fields,it > 0)
     result = filled.len == 0
 
-proc schedule_next_run(self:ref Job) =
+proc scheduleNextRun(self:ref Job) =
     ##[
     Compute the instant when this job should run next.
     ]##
     var interval:TimeInterval
-    if not self.latest.empty():
-        assert (self.latest - self.interval).empty() == false
+    if not self.latest:
+        assert self.latest - self.interval == false
         interval = ranInitInterval(self.latest)
     else:
         interval = self.interval
     # self.period = datetime.timedelta(**{self.unit: interval})
 
-    self.next_run = now() + interval
-    if self.start_day != invalid :
+    self.nextRun = now() + interval
+    if self.startDay != invalid :
         assert self.unit == uweeks
-        var days_ahead = ord(self.start_day) - 1 - ord(self.next_run.weekday)
+        var days_ahead = ord(self.startDay) - 1 - ord(self.nextRun.weekday)
         if days_ahead <= 0:  # Target day already happened this week
             days_ahead += 7
-        self.next_run += initTimeInterval(days=days_ahead) - interval
-    if self.at_time.hasValue:
-        assert self.unit in [udays, uhours] or self.start_day != invalid
-        if self.unit == udays or self.start_day != invalid:
-            self.next_run.hour = self.at_time.hour
-        self.next_run.minute = self.at_time.minute
-        self.next_run.second = self.at_time.second
+        self.nextRun += initTimeInterval(days=days_ahead) - interval
+    if self.atTime.hasValue:
+        assert self.unit in [udays, uhours] or self.startDay != invalid
+        if self.unit == udays or self.startDay != invalid:
+            self.nextRun.hour = self.atTime.hour
+        self.nextRun.minute = self.atTime.minute
+        self.nextRun.second = self.atTime.second
         # If we are running for the first time, make sure we run
         # at the specified time *today* (or *this hour*) as well
-        if self.last_run.monthday == 0:
+        if self.lastRun.monthday == 0:
             let now = now()
-            if (self.unit == udays and self.at_time > now and
+            if (self.unit == udays and self.atTime > now and
                     self.interval.days == 1):
-                self.next_run = self.next_run - initTimeInterval(days = 1)
-            elif self.unit == uhours and self.at_time.minute > now.minute:
-                self.next_run = self.next_run - initTimeInterval(hours = 1)
-    if self.start_day != invalid and self.at_time.hasValue:
+                self.nextRun = self.nextRun - initTimeInterval(days = 1)
+            elif self.unit == uhours and self.atTime.minute > now.minute:
+                self.nextRun = self.nextRun - initTimeInterval(hours = 1)
+    if self.startDay != invalid and self.atTime.hasValue:
         # Let"s see if we will still make that time we specified today
-        if (self.next_run - now()).days >= 7:
-            self.next_run -= interval
+        if (self.nextRun - now()).days >= 7:
+            self.nextRun -= interval
  
-proc todo*(self:ref Job, job_func:proc()) :ref Job =
+proc todo*(self:ref Job, jobFunc:proc()) :ref Job =
     ##[
-    Specifies the job_func that should be called every time the
+    Specifies the jobFunc that should be called every time the
     job runs.
-    Any additional arguments are passed on to job_func when
+    Any additional arguments are passed on to jobFunc when
     the job runs.
-    :param job_func: The function to be scheduled
+    :param jobFunc: The function to be scheduled
     :return: The invoked job instance
     ]##
-    self.job_func = job_func
-    self.schedule_next_run()
+    self.jobFunc = jobFunc
+    self.scheduleNextRun()
     self.scheduler.jobs.add(self)
     return self
 
 
-proc should_run(self:ref Job):bool =
+proc shouldRun(self:ref Job):bool =
     ##[
     :return: ``True`` if the job should be run now.
     ]##
-    return now() >= self.next_run
+    return now() >= self.nextRun
 
 proc run(self:ref Job) =
     ##[
     Run the job and immediately reschedule it.
-    :return: The return value returned by the `job_func`
+    :return: The return value returned by the `jobFunc`
     ]##
     # logger.info("Running job %s", self)
-    self.job_func()
-    # let ret = self.job_func()
-    self.last_run = now()
-    self.schedule_next_run()
+    self.jobFunc()
+    # let ret = self.jobFunc()
+    self.lastRun = now()
+    self.scheduleNextRun()
     # return ret
 
 proc runJob(self:Scheduler, job:ref Job) =
@@ -217,7 +214,7 @@ proc runJob(self:Scheduler, job:ref Job) =
     # if ret of CancelJob:
     #     self.cancel_job(job)
     
-proc run_pending*(self: Scheduler) =
+proc runPending*(self: Scheduler) =
     ##[
     Run all jobs that are scheduled to run.
     Please note that it is *intended behavior that run_pending()
@@ -227,11 +224,11 @@ proc run_pending*(self: Scheduler) =
     between but only once.
     ]##
     var runnable_jobs = self.jobs.filter( proc(x:ref Job):bool = x.should_run ) 
-    sort( runnable_jobs,proc (x, y: ref Job):int = cast[int]((x.next_run - y.next_run).seconds) )
+    sort( runnable_jobs,proc (x, y: ref Job):int = cast[int]((x.nextRun - y.nextRun).seconds) )
     for job in runnable_jobs:
         self.runJob(job)
 
-proc run_all*(self:Scheduler, delay_seconds=0) =
+proc runAll*(self:Scheduler, delay_seconds=0) =
     ##[
     Run all jobs regardless if they are scheduled to run or not.
     A delay of `delay` seconds is added between each job. This helps
@@ -257,7 +254,7 @@ proc clear*(self:var Scheduler, tag:string) =
     else:
         self.jobs = self.jobs.filter( proc(x:ref Job):bool = tag notin x.tags )
 
-proc cancel_job(self:var Scheduler, job:ref Job) = 
+proc cancelJob*(self:var Scheduler, job:ref Job) = 
     ##[
     Delete a scheduled job.
     :param job: The job to be unscheduled
@@ -279,18 +276,19 @@ proc every*(self:var Scheduler , interval:TimeInterval):ref Job {.discardable.}=
     :param interval: A quantity of a certain time unit
     :return: An unconfigured :class:`Job <Job>`
     ]##
+    
     testInterval(interval)
-    result = new(Job)
+    result = new Job
     result.interval = interval
     result.scheduler = addr(self)
 
-proc get_next_run*(self: Scheduler):Option[DateTime] = 
+proc getNextRun*(self: Scheduler):Option[DateTime] = 
     ##[
     Datetime when the next job should run.
     :return: A :class:`~datetime.datetime` object
     ]##
     if self.jobs.len != 0:
-        result = some(min(self.jobs).next_run)
+        result = some(min(self.jobs).nextRun)
 
 proc every*(self:var Scheduler , interval:TimeInterval,body:proc())=
     ##[
@@ -299,23 +297,23 @@ proc every*(self:var Scheduler , interval:TimeInterval,body:proc())=
     :return: An unconfigured :class:`Job <Job>`
     ]##
     testInterval(interval)
-    var result = new(Job)
+    var result = new Job
     result.interval = interval
     result.scheduler = addr(self)
-    result.job_func = body
-    result.schedule_next_run()
+    result.jobFunc = body
+    result.scheduleNextRun()
     result.scheduler.jobs.add(result)
 
-proc idle_seconds*(self:Scheduler):Natural =
+proc idleSeconds*(self:Scheduler):Natural =
     ##[
     :return: Number of seconds until
-                :meth:`next_run <Scheduler.next_run>`.
+                :meth:`nextRun <Scheduler.nextRun>`.
     ]##
-    return (self.get_next_run().get() - now()).seconds
+    return (self.getNextRun().get() - now()).seconds
 
 when isMainModule:
     proc job() =
-        echo "I'm working..."
+        echo "I'm working...",now()
     var schedule = Scheduler()
     discard schedule.every(3.seconds).todo(job)
     schedule.every(3.seconds) do:
@@ -324,5 +322,5 @@ when isMainModule:
     schedule.every 3.seconds:
             echo "I'm also working ..."
     while true:
-        schedule.run_pending()
+        schedule.runPending()
         sleep(300)
