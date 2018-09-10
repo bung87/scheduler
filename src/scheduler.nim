@@ -10,7 +10,9 @@ import algorithm
 import strutils
 import random
 import macros
-{.experimental: "dotOperators".}
+
+{.experimental.}
+
 type
     TimeObj = object
         second: SecondRange  
@@ -19,7 +21,7 @@ type
     WeekDay* = enum ## Represents a weekday.
         invalid,dMon, dTue, dWed, dThu, dFri, dSat, dSun
     unit = enum
-        milliseconds,seconds,minutes,hours,days,weeks,months,years
+        umilliseconds,useconds,uminutes,uhours,udays,uweeks,umonths,uyears
     Job* = object 
         tags: seq[string]
         next_run:DateTime
@@ -101,10 +103,10 @@ proc at*(self:var Job, time_str:string):Job =
         discard
     elif scanf(time_str, "$i", minute):
         discard
-    assert self.unit in [days,hours] or self.start_day != invalid
-    if self.unit == days or self.start_day != invalid:
+    assert self.unit in [udays,uhours] or self.start_day != invalid
+    if self.unit == udays or self.start_day != invalid:
         hour = hour
-    elif self.unit == hours:
+    elif self.unit == uhours:
         hour = 0
     self.at_time = TimeObj(hour:hour, minute:minute)
     # assert 0 <= minute <= 59
@@ -152,14 +154,14 @@ proc schedule_next_run(self:ref Job) =
 
     self.next_run = now() + interval
     if self.start_day != invalid :
-        assert self.unit == weeks
+        assert self.unit == uweeks
         var days_ahead = ord(self.start_day) - 1 - ord(self.next_run.weekday)
         if days_ahead <= 0:  # Target day already happened this week
             days_ahead += 7
         self.next_run += initTimeInterval(days=days_ahead) - interval
     if self.at_time.hasValue:
-        assert self.unit in [days, hours] or self.start_day != invalid
-        if self.unit == days or self.start_day != invalid:
+        assert self.unit in [udays, uhours] or self.start_day != invalid
+        if self.unit == udays or self.start_day != invalid:
             self.next_run.hour = self.at_time.hour
         self.next_run.minute = self.at_time.minute
         self.next_run.second = self.at_time.second
@@ -167,10 +169,10 @@ proc schedule_next_run(self:ref Job) =
         # at the specified time *today* (or *this hour*) as well
         if self.last_run.monthday == 0:
             let now = now()
-            if (self.unit == days and self.at_time > now and
+            if (self.unit == udays and self.at_time > now and
                     self.interval.days == 1):
                 self.next_run = self.next_run - initTimeInterval(days = 1)
-            elif self.unit == hours and self.at_time.minute > now.minute:
+            elif self.unit == uhours and self.at_time.minute > now.minute:
                 self.next_run = self.next_run - initTimeInterval(hours = 1)
     if self.start_day != invalid and self.at_time.hasValue:
         # Let"s see if we will still make that time we specified today
@@ -303,14 +305,14 @@ proc every*(self:var Scheduler , interval:TimeInterval,body:proc())=
     result.job_func = body
     result.schedule_next_run()
     result.scheduler.jobs.add(result)
-        
+
 proc idle_seconds*(self:Scheduler):Natural =
     ##[
     :return: Number of seconds until
                 :meth:`next_run <Scheduler.next_run>`.
     ]##
     return (self.get_next_run().get() - now()).seconds
-    
+
 when isMainModule:
     proc job() =
         echo "I'm working..."
@@ -318,6 +320,9 @@ when isMainModule:
     discard schedule.every(3.seconds).todo(job)
     schedule.every(3.seconds) do:
         echo "I'm working too..."
+    # dumpTree:
+    schedule.every 3.seconds:
+            echo "I'm also working ..."
     while true:
         schedule.run_pending()
         sleep(300)
