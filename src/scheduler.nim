@@ -268,7 +268,7 @@ proc cancelJob*(self:var Scheduler, job:ref Job) =
 proc testInterval(a:TimeInterval) =
     let fields = [a.milliseconds,a.seconds,a.minutes,a.hours,a.days,a.months,a.years]
     let filled = filterIt(fields,it > 0)
-    assert filled.len == 1
+    doAssert filled.len == 1
     
 proc every*(self:var Scheduler , interval:TimeInterval):ref Job {.discardable.}=
     ##[
@@ -304,12 +304,15 @@ proc every*(self:var Scheduler , interval:TimeInterval,body:proc())=
     result.scheduleNextRun()
     result.scheduler.jobs.add(result)
 
-proc idleSeconds*(self:Scheduler):Natural =
+proc idleSeconds*(self:Scheduler):int64 =
     ##[
     :return: Number of seconds until
                 :meth:`nextRun <Scheduler.nextRun>`.
     ]##
-    return (self.getNextRun().get() - now()).seconds
+    try:
+        result = (self.getNextRun().get() - now()).seconds
+    except UnpackError:
+        result = -1
 
 when isMainModule:
     proc job() =
@@ -320,7 +323,7 @@ when isMainModule:
         echo "I'm working too..."
     # dumpTree:
     schedule.every 3.seconds:
-            echo "I'm also working ..."
+        echo "I'm also working ..."
     while true:
         schedule.runPending()
         sleep(300)
